@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APT Orders — Real-Time Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #0f1117;
+            color: #e0e0e0;
+            padding: 30px;
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #00d4aa;
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 24px;
+            font-size: 13px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+
+        .dot.connected { background: #00d4aa; }
+
+        #status-text { color: #888; }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.85; }
+
+        #btn-insert { background: #00d4aa; color: #000; }
+        #btn-update { background: #f0a500; color: #000; }
+        #btn-clear  { background: #333; color: #fff; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        thead tr {
+            background: #1a1d27;
+            color: #00d4aa;
+            text-align: left;
+        }
+
+        th, td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #1e2130;
+        }
+
+        tbody tr {
+            transition: background 0.3s;
+        }
+
+        tbody tr:hover { background: #1a1d27; }
+
+        tbody tr.flash {
+            background: #003d30;
+            animation: flashRow 1.5s ease-out forwards;
+        }
+
+        @keyframes flashRow {
+            0%   { background: #00d4aa33; }
+            100% { background: transparent; }
+        }
+
+        .badge {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.pending   { background: #f0a50022; color: #f0a500; }
+        .badge.shipped   { background: #4a9eff22; color: #4a9eff; }
+        .badge.delivered { background: #00d4aa22; color: #00d4aa; }
+
+        .log-section h2 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        #event-log {
+            background: #1a1d27;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            padding: 4px 0;
+            border-bottom: 1px solid #1e2130;
+            color: #888;
+        }
+
+        .log-entry span { color: #00d4aa; }
+    </style>
+</head>
+<body>
+
+    <h1>⚡ APT Real-Time Order Dashboard</h1>
+    <p class="subtitle">Live updates via WebSocket — no polling</p>
+
+    <div class="status-bar">
+        <div class="dot" id="status-dot"></div>
+        <span id="status-text">Connecting...</span>
+    </div>
+
+    <div class="controls">
+        <button id="btn-insert">+ Insert Random Order</button>
+        <button id="btn-update">↺ Update Random Status</button>
+        <button id="btn-clear">Clear Log</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Customer</th>
+                <th>Product</th>
+                <th>Status</th>
+                <th>Updated At</th>
+            </tr>
+        </thead>
+        <tbody id="orders-table">
+            <tr><td colspan="5" style="color:#444; text-align:center;">Loading orders...</td></tr>
+        </tbody>
+    </table>
+
+    <div class="log-section">
+        <h2>Event Log</h2>
+        <div id="event-log"></div>
+    </div>
+
+<script>
+    const socket = io();
+    const tbody  = document.getElementById("orders-table");
+    const log    = document.getElementById("event-log");
+    const dot    = document.getElementById("status-dot");
+    const status = document.getElementById("status-text");
+
+    // Sample data for demo buttons
+    const customers = ["Ravi Kumar", "Priya Sharma", "Amit Patel", "Sneha Joshi", "Arjun Singh"];
+    const products  = ["Algo Strategy A", "Options Pack", "Nifty Bundle", "Index Tracker", "Futures Kit"];
+    const statuses  = ["pending", "shipped", "delivered"];
+
+    // ── WebSocket Events ──────────────────────────────────────────
+
+    socket.on("connect", () => {
+        dot.classList.add("connected");
+        status.textContent = "Connected — listening for live updates";
+        addLog("WebSocket connected");
+    });
+
+    socket.on("disconnect", () => {
+        dot.classList.remove("connected");
+        status.textContent = "Disconnected";
+        addLog("WebSocket disconnected");
+    });
+
+    socket.on("order_update", (order) => {
+        addLog(`Order #${order.id} → ${order.status} (${order.customer_name})`);
+        upsertRow(order);
+    });
+
+    // ── Load Existing Orders on Page Load ────────────────────────
+
+    fetch("/orders")
+        .then(r => r.json())
+        .then(orders => {
+            tbody.innerHTML = "";
+            if (orders.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5" style="color:#444;text-align:center;">No orders yet — insert one!</td></tr>`;
+                return;
+            }
+            orders.forEach(o => upsertRow(o, false));
+        });
+
+    // ── Demo Buttons ──────────────────────────────────────────────
+
+    document.getElementById("btn-insert").addEventListener("click", () => {
+        fetch("/demo/insert", { method: "POST" });
+    });
+
+    document.getElementById("btn-update").addEventListener("click", () => {
+        fetch("/demo/update", { method: "POST" });
+    });
+
+    document.getElementById("btn-clear").addEventListener("click", () => {
+        log.innerHTML = "";
+    });
+
+    // ── Helper Functions ──────────────────────────────────────────
+
+    function upsertRow(order, flash = true) {
+        let row = document.getElementById(`row-${order.id}`);
+
+        if (!row) {
+            row = document.createElement("tr");
+            row.id = `row-${order.id}`;
+            tbody.prepend(row);
+
+            // Remove empty state row
+            const empty = tbody.querySelector("td[colspan]");
+            if (empty) empty.parentElement.remove();
+        }
+
+        row.innerHTML = `
+            <td>#${order.id}</td>
+            <td>${order.customer_name}</td>
+            <td>${order.product_name}</td>
+            <td><span class="badge ${order.status}">${order.status}</span></td>
+            <td>${order.updated_at}</td>
+        `;
+
+        if (flash) {
+            row.classList.remove("flash");
+            void row.offsetWidth; // force reflow
+            row.classList.add("flash");
+        }
+    }
+
+    function addLog(msg) {
+        const entry = document.createElement("div");
+        entry.className = "log-entry";
+        entry.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> — ${msg}`;
+        log.prepend(entry);
+    }
+</script>
+
+</body>
+</html>
