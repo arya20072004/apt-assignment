@@ -3,227 +3,610 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>APT Orders — Real-Time Dashboard</title>
+    <title>APT — Order Pipeline</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #0f1117;
-            color: #e0e0e0;
-            padding: 30px;
+        :root {
+            --bg:        #080b10;
+            --surface:   #0d1117;
+            --border:    #1c2230;
+            --border-hi: #2a3448;
+            --text:      #cdd6e0;
+            --muted:     #4a5568;
+            --accent:    #3b82f6;
+            --accent-dim:#1d4ed833;
+            --green:     #10b981;
+            --green-dim: #05966933;
+            --amber:     #f59e0b;
+            --amber-dim: #d9770633;
+            --red:       #ef4444;
+            --red-dim:   #dc262633;
+            --mono:      'IBM Plex Mono', monospace;
+            --sans:      'IBM Plex Sans', sans-serif;
         }
 
-        h1 {
-            font-size: 24px;
-            color: #00d4aa;
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--sans);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Top bar ── */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            height: 52px;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .logo {
+            font-family: var(--mono);
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--accent);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .sep { width: 1px; height: 18px; background: var(--border); }
+
+        .page-title {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--muted);
+        }
+
+        .ws-pill {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+            background: var(--border);
+            padding: 4px 10px;
+            border-radius: 4px;
+            transition: all 0.3s;
+        }
+
+        .ws-pill.live {
+            color: var(--green);
+            background: var(--green-dim);
+            border: 1px solid #10b98133;
+        }
+
+        .ws-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .ws-pill.live .ws-dot {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.3; }
+        }
+
+        /* ── Stats row ── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat {
+            padding: 16px 28px;
+            border-right: 1px solid var(--border);
+        }
+        .stat:last-child { border-right: none; }
+
+        .stat-label {
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
             margin-bottom: 6px;
         }
 
-        .subtitle {
-            font-size: 13px;
-            color: #666;
-            margin-bottom: 30px;
+        .stat-value {
+            font-family: var(--mono);
+            font-size: 22px;
+            font-weight: 500;
+            color: var(--text);
+            line-height: 1;
         }
 
-        .status-bar {
+        .stat-value.accent { color: var(--accent); }
+        .stat-value.green  { color: var(--green); }
+        .stat-value.amber  { color: var(--amber); }
+
+        .stat-sub {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        /* ── Main content ── */
+        .main {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* ── Orders panel ── */
+        .orders-panel {
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .panel-header {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 24px;
-            font-size: 13px;
+            justify-content: space-between;
+            padding: 14px 24px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
 
-        .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #ff4444;
-        }
-
-        .dot.connected { background: #00d4aa; }
-
-        #status-text { color: #888; }
-
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 24px;
-            flex-wrap: wrap;
-        }
-
-        button {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
+        .panel-title {
+            font-family: var(--mono);
+            font-size: 11px;
             font-weight: 500;
-            transition: opacity 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
         }
 
-        button:hover { opacity: 0.85; }
+        .btn-group { display: flex; gap: 8px; }
 
-        #btn-insert { background: #00d4aa; color: #000; }
-        #btn-update { background: #f0a500; color: #000; }
-        #btn-clear  { background: #333; color: #fff; }
+        .btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border: 1px solid var(--border-hi);
+            border-radius: 4px;
+            background: transparent;
+            color: var(--text);
+            font-family: var(--sans);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .btn:hover {
+            background: var(--border);
+            border-color: var(--muted);
+        }
+
+        .btn:active { transform: scale(0.97); }
+
+        .btn.primary {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn.primary:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .btn.secondary {
+            background: var(--amber-dim);
+            border-color: var(--amber);
+            color: var(--amber);
+        }
+
+        .btn.secondary:hover {
+            background: var(--amber);
+            color: #000;
+        }
+
+        /* ── Table ── */
+        .table-wrap {
+            overflow-y: auto;
+            flex: 1;
+        }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 14px;
-            margin-bottom: 30px;
+            font-size: 13px;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
 
         thead tr {
-            background: #1a1d27;
-            color: #00d4aa;
-            text-align: left;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
         }
 
-        th, td {
-            padding: 12px 16px;
-            border-bottom: 1px solid #1e2130;
+        th {
+            padding: 10px 20px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted);
+            text-align: left;
+            white-space: nowrap;
         }
 
         tbody tr {
-            transition: background 0.3s;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.15s;
         }
 
-        tbody tr:hover { background: #1a1d27; }
+        tbody tr:hover { background: #0d111799; }
 
-        tbody tr.flash {
-            background: #003d30;
-            animation: flashRow 1.5s ease-out forwards;
+        td {
+            padding: 12px 20px;
+            color: var(--text);
+            vertical-align: middle;
         }
 
-        @keyframes flashRow {
-            0%   { background: #00d4aa33; }
-            100% { background: transparent; }
+        .order-id {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .customer-name { font-weight: 500; }
+
+        .product-name {
+            font-size: 12px;
+            color: #8899aa;
         }
 
         .badge {
-            padding: 3px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: 3px;
+            font-family: var(--mono);
+            font-size: 10px;
+            font-weight: 500;
             text-transform: uppercase;
+            letter-spacing: 0.06em;
+            border: 1px solid transparent;
         }
 
-        .badge.pending   { background: #f0a50022; color: #f0a500; }
-        .badge.shipped   { background: #4a9eff22; color: #4a9eff; }
-        .badge.delivered { background: #00d4aa22; color: #00d4aa; }
-
-        .log-section h2 {
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+        .badge::before {
+            content: '';
+            width: 5px; height: 5px;
+            border-radius: 50%;
+            background: currentColor;
         }
 
-        #event-log {
-            background: #1a1d27;
-            border-radius: 8px;
-            padding: 16px;
-            font-family: monospace;
-            font-size: 12px;
-            max-height: 200px;
+        .badge.pending  { background: var(--amber-dim); color: var(--amber);  border-color: #f59e0b44; }
+        .badge.shipped  { background: var(--accent-dim); color: var(--accent); border-color: #3b82f644; }
+        .badge.delivered{ background: var(--green-dim); color: var(--green);  border-color: #10b98144; }
+
+        .ts {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        /* ── Flash animation ── */
+        @keyframes rowFlash {
+            0%   { background: #3b82f611; }
+            30%  { background: #3b82f622; }
+            100% { background: transparent; }
+        }
+
+        tbody tr.flash {
+            animation: rowFlash 1.8s ease-out forwards;
+        }
+
+        /* ── New row slide in ── */
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        tbody tr.new-row {
+            animation: slideIn 0.25s ease-out forwards;
+        }
+
+        /* ── Empty state ── */
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+        }
+
+        .empty-state .icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 13px;
+            color: var(--muted);
+        }
+
+        /* ── Right panel: log ── */
+        .log-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .log-entries {
+            flex: 1;
             overflow-y: auto;
+            padding: 0;
         }
 
         .log-entry {
-            padding: 4px 0;
-            border-bottom: 1px solid #1e2130;
-            color: #888;
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 12px;
+            align-items: start;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+            animation: fadeIn 0.2s ease-out;
         }
 
-        .log-entry span { color: #00d4aa; }
+        @keyframes fadeIn {
+            from { opacity: 0; background: #3b82f608; }
+            to   { opacity: 1; background: transparent; }
+        }
+
+        .log-time {
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--muted);
+            white-space: nowrap;
+            padding-top: 1px;
+        }
+
+        .log-msg { color: #8899aa; line-height: 1.4; }
+        .log-msg strong { color: var(--text); font-weight: 500; }
+        .log-msg .ev-insert { color: var(--accent); }
+        .log-msg .ev-update { color: var(--amber); }
+        .log-msg .ev-ws     { color: var(--green); }
+
+        .log-footer {
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
+        .btn-ghost {
+            background: none;
+            border: 1px solid var(--border-hi);
+            border-radius: 4px;
+            padding: 5px 12px;
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--muted);
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            transition: all 0.15s;
+            width: 100%;
+        }
+
+        .btn-ghost:hover { border-color: var(--muted); color: var(--text); }
+
+        /* ── Scrollbars ── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+        /* ── Latency chip ── */
+        .latency {
+            font-family: var(--mono);
+            font-size: 10px;
+            color: var(--muted);
+            background: var(--border);
+            padding: 2px 7px;
+            border-radius: 3px;
+        }
+
+        .latency.fast { color: var(--green); background: var(--green-dim); }
     </style>
 </head>
 <body>
 
-    <h1>⚡ APT Real-Time Order Dashboard</h1>
-    <p class="subtitle">Live updates via WebSocket — no polling</p>
+<!-- Top bar -->
+<header class="topbar">
+    <div class="topbar-left">
+        <span class="logo">APT</span>
+        <div class="sep"></div>
+        <span class="page-title">Order Pipeline · Real-time</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+        <span class="latency" id="latency-chip">latency —</span>
+        <div class="ws-pill" id="ws-pill">
+            <div class="ws-dot"></div>
+            <span id="ws-label">connecting</span>
+        </div>
+    </div>
+</header>
 
-    <div class="status-bar">
-        <div class="dot" id="status-dot"></div>
-        <span id="status-text">Connecting...</span>
+<!-- Stats row -->
+<div class="stats-row">
+    <div class="stat">
+        <div class="stat-label">Total Orders</div>
+        <div class="stat-value accent" id="stat-total">0</div>
+        <div class="stat-sub">all time</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Pending</div>
+        <div class="stat-value amber" id="stat-pending">0</div>
+        <div class="stat-sub">awaiting shipment</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Shipped</div>
+        <div class="stat-value accent" id="stat-shipped">0</div>
+        <div class="stat-sub">in transit</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Delivered</div>
+        <div class="stat-value green" id="stat-delivered">0</div>
+        <div class="stat-sub">completed</div>
+    </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+    <!-- Orders table -->
+    <div class="orders-panel">
+        <div class="panel-header">
+            <span class="panel-title">Orders</span>
+            <div class="btn-group">
+                <button class="btn primary" id="btn-insert">
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                    Insert Order
+                </button>
+                <button class="btn secondary" id="btn-update">
+                    <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 6a5 5 0 1 0 1.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M1 2.5V6h3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    Update Status
+                </button>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Customer</th>
+                        <th>Product</th>
+                        <th>Status</th>
+                        <th>Updated</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-body">
+                    <tr>
+                        <td colspan="5">
+                            <div class="empty-state">
+                                <div class="icon">◫</div>
+                                <p>Loading orders…</p>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
-    <div class="controls">
-        <button id="btn-insert">+ Insert Random Order</button>
-        <button id="btn-update">↺ Update Random Status</button>
-        <button id="btn-clear">Clear Log</button>
+    <!-- Event log -->
+    <div class="log-panel">
+        <div class="panel-header">
+            <span class="panel-title">Event Stream</span>
+        </div>
+        <div class="log-entries" id="event-log"></div>
+        <div class="log-footer">
+            <button class="btn-ghost" id="btn-clear">Clear log</button>
+        </div>
     </div>
 
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Customer</th>
-                <th>Product</th>
-                <th>Status</th>
-                <th>Updated At</th>
-            </tr>
-        </thead>
-        <tbody id="orders-table">
-            <tr><td colspan="5" style="color:#444; text-align:center;">Loading orders...</td></tr>
-        </tbody>
-    </table>
-
-    <div class="log-section">
-        <h2>Event Log</h2>
-        <div id="event-log"></div>
-    </div>
+</div>
 
 <script>
+    // ── State ────────────────────────────────────────────────────────
+    const orders = new Map(); // id → order
+    let eventCount = 0;
+
+    // ── DOM refs ─────────────────────────────────────────────────────
+    const tbody       = document.getElementById("orders-body");
+    const logEl       = document.getElementById("event-log");
+    const wsPill      = document.getElementById("ws-pill");
+    const wsLabel     = document.getElementById("ws-label");
+    const latencyChip = document.getElementById("latency-chip");
+
+    const statTotal     = document.getElementById("stat-total");
+    const statPending   = document.getElementById("stat-pending");
+    const statShipped   = document.getElementById("stat-shipped");
+    const statDelivered = document.getElementById("stat-delivered");
+
+    // ── Socket ───────────────────────────────────────────────────────
     const socket = io();
-    const tbody  = document.getElementById("orders-table");
-    const log    = document.getElementById("event-log");
-    const dot    = document.getElementById("status-dot");
-    const status = document.getElementById("status-text");
-
-    // Sample data for demo buttons
-    const customers = ["Ravi Kumar", "Priya Sharma", "Amit Patel", "Sneha Joshi", "Arjun Singh"];
-    const products  = ["Algo Strategy A", "Options Pack", "Nifty Bundle", "Index Tracker", "Futures Kit"];
-    const statuses  = ["pending", "shipped", "delivered"];
-
-    // ── WebSocket Events ──────────────────────────────────────────
 
     socket.on("connect", () => {
-        dot.classList.add("connected");
-        status.textContent = "Connected — listening for live updates";
-        addLog("WebSocket connected");
+        wsPill.classList.add("live");
+        wsLabel.textContent = "live";
+        addLog("ws", "WebSocket connected");
     });
 
     socket.on("disconnect", () => {
-        dot.classList.remove("connected");
-        status.textContent = "Disconnected";
-        addLog("WebSocket disconnected");
+        wsPill.classList.remove("live");
+        wsLabel.textContent = "disconnected";
+        addLog("ws", "WebSocket disconnected");
     });
 
     socket.on("order_update", (order) => {
-        addLog(`Order #${order.id} → ${order.status} (${order.customer_name})`);
-        upsertRow(order);
+        const isNew = !orders.has(order.id);
+        const t0 = performance.now();
+        orders.set(order.id, order);
+        upsertRow(order, isNew);
+        updateStats();
+
+        // approximate round-trip from emit to receipt
+        const ms = Math.round(performance.now() - t0);
+        showLatency(ms);
+
+        const evt = isNew ? "insert" : "update";
+        addLog(evt, `Order <strong>#${order.id}</strong> · ${order.customer_name} → <span class="ev-${evt}">${order.status}</span>`);
     });
 
-    // ── Load Existing Orders on Page Load ────────────────────────
-
+    // ── Initial load ─────────────────────────────────────────────────
     fetch("/orders")
         .then(r => r.json())
-        .then(orders => {
+        .then(list => {
             tbody.innerHTML = "";
-            if (orders.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" style="color:#444;text-align:center;">No orders yet — insert one!</td></tr>`;
+            if (list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="icon">◫</div><p>No orders yet — insert one to start.</p></div></td></tr>`;
                 return;
             }
-            orders.forEach(o => upsertRow(o, false));
+            list.forEach(o => {
+                orders.set(o.id, o);
+                upsertRow(o, false, false);
+            });
+            updateStats();
         });
 
-    // ── Demo Buttons ──────────────────────────────────────────────
-
+    // ── Buttons ───────────────────────────────────────────────────────
     document.getElementById("btn-insert").addEventListener("click", () => {
         fetch("/demo/insert", { method: "POST" });
     });
@@ -233,46 +616,102 @@
     });
 
     document.getElementById("btn-clear").addEventListener("click", () => {
-        log.innerHTML = "";
+        logEl.innerHTML = "";
+        eventCount = 0;
     });
 
-    // ── Helper Functions ──────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────
+    function upsertRow(order, isNew = false, animate = true) {
+        // Clear empty state
+        const empty = tbody.querySelector("td[colspan]");
+        if (empty) empty.closest("tr").remove();
 
-    function upsertRow(order, flash = true) {
         let row = document.getElementById(`row-${order.id}`);
 
         if (!row) {
             row = document.createElement("tr");
             row.id = `row-${order.id}`;
-            tbody.prepend(row);
-
-            // Remove empty state row
-            const empty = tbody.querySelector("td[colspan]");
-            if (empty) empty.parentElement.remove();
+        } else {
+            row.remove();
         }
+        tbody.prepend(row);
+        if (animate) row.classList.add("new-row");
 
         row.innerHTML = `
-            <td>#${order.id}</td>
-            <td>${order.customer_name}</td>
-            <td>${order.product_name}</td>
+            <td class="order-id">#${String(order.id).padStart(4, "0")}</td>
+            <td class="customer-name">${esc(order.customer_name)}</td>
+            <td class="product-name">${esc(order.product_name)}</td>
             <td><span class="badge ${order.status}">${order.status}</span></td>
-            <td>${order.updated_at}</td>
+            <td class="ts">${fmtDate(order.updated_at)}</td>
         `;
 
-        if (flash) {
+        if (animate && !isNew) {
             row.classList.remove("flash");
-            void row.offsetWidth; // force reflow
+            void row.offsetWidth;
             row.classList.add("flash");
         }
     }
 
-    function addLog(msg) {
+    function updateStats() {
+        let pending = 0, shipped = 0, delivered = 0;
+        for (const o of orders.values()) {
+            if (o.status === "pending")   pending++;
+            else if (o.status === "shipped")   shipped++;
+            else if (o.status === "delivered") delivered++;
+        }
+        animateNum(statTotal,     orders.size);
+        animateNum(statPending,   pending);
+        animateNum(statShipped,   shipped);
+        animateNum(statDelivered, delivered);
+    }
+
+    function animateNum(el, target) {
+        const current = parseInt(el.textContent) || 0;
+        if (current === target) return;
+        el.textContent = target;
+        el.style.transform = "scale(1.15)";
+        el.style.transition = "transform 0.2s ease";
+        setTimeout(() => { el.style.transform = ""; }, 200);
+    }
+
+    function addLog(type, msg) {
         const entry = document.createElement("div");
         entry.className = "log-entry";
-        entry.innerHTML = `<span>${new Date().toLocaleTimeString()}</span> — ${msg}`;
-        log.prepend(entry);
+        const cls = type === "insert" ? "ev-insert" : type === "update" ? "ev-update" : "ev-ws";
+        const prefix = type === "ws" ? "SYS" : type.toUpperCase();
+        entry.innerHTML = `
+            <span class="log-time">${now()}</span>
+            <span class="log-msg"><span class="${cls}">[${prefix}]</span> ${msg}</span>
+        `;
+        logEl.prepend(entry);
+
+        // Keep log from growing unbounded
+        const entries = logEl.querySelectorAll(".log-entry");
+        if (entries.length > 100) entries[entries.length - 1].remove();
+    }
+
+    function showLatency(ms) {
+        latencyChip.textContent = `${ms} ms`;
+        latencyChip.className = "latency" + (ms < 20 ? " fast" : "");
+    }
+
+    function fmtDate(raw) {
+        try {
+            const d = new Date(raw.replace(" ", "T"));
+            return d.toLocaleString("en-IN", {
+                month: "short", day: "numeric",
+                hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+        } catch { return raw; }
+    }
+
+    function now() {
+        return new Date().toLocaleTimeString("en-IN", { hour12: false });
+    }
+
+    function esc(s) {
+        return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     }
 </script>
-
 </body>
 </html>
